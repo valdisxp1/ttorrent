@@ -121,13 +121,52 @@ public class CommunicationManagerTest {
     seeder.addTorrent(torrentFile.getAbsolutePath(), tempFile.getParent());
     seeder.start(InetAddress.getLocalHost());
 
-    waitForSeederIsAnnounsedOnTracker(torrent.getHexInfoHash());
+    waitForSeederIsAnnouncedOnTracker(torrent.getHexInfoHash());
 
     CommunicationManager leecher = createClient();
     leecher.start(InetAddress.getLocalHost());
     TorrentManager torrentManager = leecher.addTorrent(torrentFile.getAbsolutePath(), tempFiles.createTempDir().getAbsolutePath());
     waitDownloadComplete(torrentManager, 15);
     assertFalse(isSeederReceivedHaveMessage.get());
+  }
+
+  private static class BlockingTorrentListener extends TorrentListenerWrapper {
+    private final Object peerConnectMutex = new Object();
+    private boolean peerDidConnect;
+    private final Object downloadCompleteMutex = new Object();
+    private boolean downloadDidComplete;
+
+    @Override
+    public void peerConnected(PeerInformation peerInformation) {
+      synchronized (peerConnectMutex) {
+        peerDidConnect = true;
+        peerConnectMutex.notifyAll();
+      }
+    }
+
+    public void waitForAnyPeerConnected(int timeoutSec) throws InterruptedException {
+      synchronized (peerConnectMutex) {
+        if (!peerDidConnect) {
+          peerConnectMutex.wait(timeoutSec * 1000L);
+        }
+      }
+    }
+
+    @Override
+    public void downloadComplete() {
+      synchronized (downloadCompleteMutex) {
+        downloadDidComplete = true;
+        downloadCompleteMutex.notifyAll();
+      }
+    }
+
+    public void waitForDownloadCompleted(int timeoutSec) throws InterruptedException {
+      synchronized (downloadCompleteMutex) {
+        if (!downloadDidComplete) {
+          downloadCompleteMutex.wait(timeoutSec * 1000L);
+        }
+      }
+    }
   }
 
   private void waitDownloadComplete(TorrentManager torrentManager, int timeoutSec) throws InterruptedException {
@@ -147,7 +186,7 @@ public class CommunicationManagerTest {
     }
   }
 
-  private void waitForSeederIsAnnounsedOnTracker(final String hexInfoHash) {
+  private void waitForSeederIsAnnouncedOnTracker(final String hexInfoHash) {
     final WaitFor waitFor = new WaitFor(10 * 1000) {
       @Override
       protected boolean condition() {
@@ -675,7 +714,7 @@ public class CommunicationManagerTest {
     }
   }
 
-  public void testThatTorrentsHaveLazyInitAndRemovingAfterDownload() throws IOException {
+  public void testThatTorrentsHaveLazyInitAndRemovingAfterDownload() throws IOException, InterruptedException {
     final CommunicationManager seeder = createClient();
     File tempFile = tempFiles.createTempFile(100 * 1025 * 1024);
     TorrentMetadata torrent = new MetadataBuilder()
@@ -685,11 +724,15 @@ public class CommunicationManagerTest {
             .build();
     File torrentFile = new File(tempFile.getParentFile(), tempFile.getName() + ".torrent");
     saveTorrent(torrent, torrentFile);
-    seeder.addTorrent(torrentFile.getAbsolutePath(), tempFile.getParentFile().getAbsolutePath());
+    TorrentManager seederTorrentManager = seeder.addTorrent(torrentFile.getAbsolutePath(), tempFile.getParentFile().getAbsolutePath());
+    BlockingTorrentListener seederListener = new BlockingTorrentListener();
+    seederTorrentManager.addListener(seederListener);
 
     final CommunicationManager leecher = createClient();
     File downloadDir = tempFiles.createTempDir();
-    leecher.addTorrent(torrentFile.getAbsolutePath(), downloadDir.getAbsolutePath());
+    TorrentManager leecherTorrentManager = leecher.addTorrent(torrentFile.getAbsolutePath(), downloadDir.getAbsolutePath());
+    BlockingTorrentListener leecherListener = new BlockingTorrentListener();
+    leecherTorrentManager.addListener(leecherListener);
     seeder.start(InetAddress.getLocalHost());
 
     assertEquals(1, seeder.getTorrentsStorage().announceableTorrents().size());
@@ -698,37 +741,20 @@ public class CommunicationManagerTest {
 
     leecher.start(InetAddress.getLocalHost());
 
-    WaitFor waitFor = new WaitFor(10 * 1000, 50) {
-
-      @Override
-      protected boolean condition() {
-        return seeder.getTorrentsStorage().activeTorrents().size() == 1 &&
-                leecher.getTorrentsStorage().activeTorrents().size() == 1;
-      }
-    };
-
-    assertTrue(waitFor.isMyResult(), "Torrent was not successfully initialized");
+    seederListener.waitForAnyPeerConnected(10);
+    leecherListener.waitForAnyPeerConnected(10);
 
     assertEquals(1, seeder.getTorrentsStorage().activeTorrents().size());
     assertEquals(1, leecher.getTorrentsStorage().activeTorrents().size());
 
-    waitForFileInDir(downloadDir, tempFile.getName());
+    seederListener.waitForDownloadCompleted(10);
+    leecherListener.waitForDownloadCompleted(10);
+
+    assertFileInDir(downloadDir, tempFile.getName());
     assertFilesEqual(tempFile, new File(downloadDir, tempFile.getName()));
-
-    waitFor = new WaitFor(10 * 1000) {
-
-      @Override
-      protected boolean condition() {
-        return seeder.getTorrentsStorage().activeTorrents().size() == 0 &&
-                leecher.getTorrentsStorage().activeTorrents().size() == 0;
-      }
-    };
-
-    assertTrue(waitFor.isMyResult(), "Torrent was not successfully removed");
 
     assertEquals(0, seeder.getTorrentsStorage().activeTorrents().size());
     assertEquals(0, leecher.getTorrentsStorage().activeTorrents().size());
-
   }
 
   public void corrupted_seeder() throws IOException, NoSuchAlgorithmException {
@@ -1543,6 +1569,10 @@ public class CommunicationManagerTest {
       }
     };
 
+    assertFileInDir(downloadDir, fileName);
+  }
+
+  private void assertFileInDir(File downloadDir, String fileName) {
     assertTrue(new File(downloadDir, fileName).isFile());
   }
 
