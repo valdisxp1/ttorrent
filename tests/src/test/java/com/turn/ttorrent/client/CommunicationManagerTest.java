@@ -698,7 +698,7 @@ public class CommunicationManagerTest {
 
     leecher.start(InetAddress.getLocalHost());
 
-    WaitFor waitFor = new WaitFor(10 * 1000) {
+    WaitFor waitFor = new WaitFor(10 * 1000, 50) {
 
       @Override
       protected boolean condition() {
