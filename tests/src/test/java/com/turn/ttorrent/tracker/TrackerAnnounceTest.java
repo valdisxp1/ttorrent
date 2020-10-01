@@ -32,7 +32,7 @@ public class TrackerAnnounceTest {
   }
 
   @AfterMethod
-  public void tearDown() throws Exception {
+  public void tearDown() {
     this.tracker.stop();
   }
 }

@@ -8,9 +8,9 @@ import com.turn.ttorrent.client.peer.SharingPeer;
 import com.turn.ttorrent.client.storage.FairPieceStorageFactory;
 import com.turn.ttorrent.client.storage.FileCollectionStorage;
 import com.turn.ttorrent.common.Peer;
-import com.turn.ttorrent.common.TorrentCreator;
 import com.turn.ttorrent.common.TorrentMetadata;
 import com.turn.ttorrent.common.TorrentSerializer;
+import com.turn.ttorrent.common.creation.MetadataBuilder;
 import com.turn.ttorrent.network.ConnectionManager;
 import org.apache.log4j.BasicConfigurator;
 import org.apache.log4j.ConsoleAppender;
@@ -23,7 +23,6 @@ import org.testng.annotations.Test;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.net.URI;
 import java.nio.ByteBuffer;
 import java.nio.channels.ByteChannel;
 import java.nio.channels.Pipe;
@@ -54,7 +53,7 @@ public class HandshakeReceiverTest {
   }
 
   @BeforeMethod
-  public void setUp() throws Exception {
+  public void setUp() {
     myTempFiles = new TempFiles();
     Logger.getRootLogger().setLevel(Utils.getLogLevel());
     mySelfId = "selfId1selfId2selfId".getBytes();
@@ -75,7 +74,7 @@ public class HandshakeReceiverTest {
   }
 
   @AfterMethod
-  public void tearDown() throws Exception {
+  public void tearDown() {
     myTempFiles.cleanup();
   }
 
@@ -98,7 +97,7 @@ public class HandshakeReceiverTest {
     client.write(byteBuffer);
 
     final File tempFile = myTempFiles.createTempFile(1024 * 1024);
-    TorrentMetadata torrent = TorrentCreator.create(tempFile, URI.create(""), "test");
+    TorrentMetadata torrent = new MetadataBuilder().addFile(tempFile).setTracker("").setCreatedBy("test").build();
     File torrentFile = myTempFiles.createTempFile();
     FileOutputStream fos = new FileOutputStream(torrentFile);
     fos.write(new TorrentSerializer().serialize(torrent));
