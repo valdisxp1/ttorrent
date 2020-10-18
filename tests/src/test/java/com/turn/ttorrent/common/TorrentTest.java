@@ -1,6 +1,5 @@
 package com.turn.ttorrent.common;
 
-import com.turn.ttorrent.common.creation.MetadataBuilder;
 import org.apache.commons.codec.binary.Hex;
 import org.apache.commons.io.FileUtils;
 import org.testng.annotations.Test;
