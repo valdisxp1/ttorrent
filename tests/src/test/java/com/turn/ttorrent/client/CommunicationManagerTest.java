@@ -25,10 +25,14 @@ import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
 import java.io.*;
-import java.net.*;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.nio.ByteBuffer;
 import java.nio.channels.ByteChannel;
 import java.nio.channels.ClosedByInterruptException;
+import java.nio.file.*;
 import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -43,6 +47,8 @@ import java.util.zip.Checksum;
 
 import static com.turn.ttorrent.CommunicationManagerFactory.DEFAULT_POOL_SIZE;
 import static com.turn.ttorrent.tracker.Tracker.ANNOUNCE_URL;
+import static java.nio.file.StandardWatchEventKinds.ENTRY_CREATE;
+import static java.nio.file.StandardWatchEventKinds.OVERFLOW;
 import static org.testng.Assert.*;
 
 /**
@@ -869,9 +875,8 @@ public class CommunicationManagerTest {
     seeder.addTorrent(torrentFile.getAbsolutePath(), dwnlFile.getParent());
     seeder.start(InetAddress.getLocalHost());
 
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < 50; i++) {
       downloadAndStop(torrent, 250 * 1000, createClient());
-      Thread.sleep(3 * 1000);
     }
   }
 
@@ -1557,17 +1562,35 @@ public class CommunicationManagerTest {
 
   private String getFileMD5(File file, MessageDigest digest) throws IOException {
     DigestInputStream dIn = new DigestInputStream(new FileInputStream(file), digest);
+    //noinspection StatementWithEmptyBody
     while (dIn.read() >= 0) ;
     return dIn.getMessageDigest().toString();
   }
 
-  private void waitForFileInDir(final File downloadDir, final String fileName) {
-    new WaitFor() {
-      @Override
-      protected boolean condition() {
-        return new File(downloadDir, fileName).isFile();
+  private void waitForFileInDir(final File downloadDir, final String fileName) throws IOException {
+    WatchService ws = FileSystems.getDefault().newWatchService();
+    Path dirPath = Paths.get(downloadDir.toURI());
+    WatchKey key = dirPath.register(ws, ENTRY_CREATE);
+
+    for (WatchEvent<?> event : key.pollEvents()) {
+      WatchEvent.Kind<?> kind = event.kind();
+      if (kind == OVERFLOW) {
+        continue;
       }
-    };
+      //noinspection unchecked
+      WatchEvent<Path> e = (WatchEvent<Path>) event;
+      if (e.context().endsWith(fileName)) {
+        break;
+      }
+      dirPath.resolve(fileName);
+
+      boolean valid = key.reset();
+      if (!valid) {
+        break;
+      }
+    }
+    key.cancel();
+    ws.close();
 
     assertFileInDir(downloadDir, fileName);
   }
