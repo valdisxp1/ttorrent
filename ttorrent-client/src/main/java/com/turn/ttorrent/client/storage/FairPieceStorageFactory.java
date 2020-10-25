@@ -29,6 +29,7 @@ public class FairPieceStorageFactory implements PieceStorageFactory {
     }
 
     byteStorage.open(false);
+    boolean completelyBlank = byteStorage.isBlank();
     BitSet availablePieces = new BitSet(metadata.getPiecesCount());
     try {
       int pieceLength = metadata.getPieceLength();
@@ -40,10 +41,16 @@ public class FairPieceStorageFactory implements PieceStorageFactory {
         } else {
           len = (int) (totalSize - position);
         }
-        ByteBuffer buffer = ByteBuffer.allocate(len);
-        byteStorage.read(buffer, position);
         byte[] expectedHash = Arrays.copyOfRange(metadata.getPiecesHashes(), i * Constants.PIECE_HASH_SIZE, (i + 1) * Constants.PIECE_HASH_SIZE);
-        byte[] actualHash = TorrentUtils.calculateSha1Hash(buffer.array());
+        byte[] actualHash;
+        if (completelyBlank || byteStorage.isBlank(position, len)) {
+          actualHash = TorrentUtils.calculateZeroSha1Hash(len);
+        } else {
+          ByteBuffer buffer = ByteBuffer.allocate(len);
+          byteStorage.read(buffer, position);
+
+          actualHash = TorrentUtils.calculateSha1Hash(buffer.array());
+        }
         if (Arrays.equals(expectedHash, actualHash)) {
           availablePieces.set(i);
         }

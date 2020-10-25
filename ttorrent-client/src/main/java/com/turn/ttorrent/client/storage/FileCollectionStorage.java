@@ -1,12 +1,12 @@
 /**
  * Copyright (C) 2011-2012 Turn, Inc.
- *
+ * <p>
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
+ * <p>
  * http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -48,7 +48,6 @@ public class FileCollectionStorage implements TorrentByteStorage {
 
   private final List<FileStorage> files;
   private final long size;
-  private volatile boolean myIsOpen;
 
   /**
    * Initialize a new multi-file torrent byte storage.
@@ -96,7 +95,6 @@ public class FileCollectionStorage implements TorrentByteStorage {
       if (!file.isOpen())
         file.open(seeder);
     }
-    myIsOpen = true;
   }
 
   @Override
@@ -137,11 +135,30 @@ public class FileCollectionStorage implements TorrentByteStorage {
   }
 
   @Override
+  public boolean isBlank(long position, long size) {
+    for (FileOffset fo : this.select(position, size)) {
+      if (!fo.file.isBlank(fo.offset, fo.length)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  @Override
+  public boolean isBlank() {
+    for (FileStorage file : this.files) {
+      if (!file.isBlank()) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  @Override
   public synchronized void close() throws IOException {
     for (FileStorage file : this.files) {
       file.close();
     }
-    myIsOpen = false;
   }
 
   @Override
