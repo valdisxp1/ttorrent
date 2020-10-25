@@ -7,6 +7,7 @@ import com.turn.ttorrent.client.storage.FileStorage;
 import com.turn.ttorrent.client.storage.FullyPieceStorageFactory;
 import com.turn.ttorrent.client.storage.PieceStorage;
 import com.turn.ttorrent.common.*;
+import com.turn.ttorrent.common.creation.MetadataBuilder;
 import com.turn.ttorrent.common.protocol.PeerMessage;
 import com.turn.ttorrent.network.FirstAvailableChannel;
 import com.turn.ttorrent.network.ServerChannelRegister;
@@ -109,23 +110,63 @@ public class CommunicationManagerTest {
     communicationManagerList.add(seeder);
 
     File tempFile = tempFiles.createTempFile(100 * 1025 * 1024);
-    URL announce = new URL("http://127.0.0.1:6969/announce");
-    URI announceURI = announce.toURI();
-
-    TorrentMetadata torrent = TorrentCreator.create(tempFile, announceURI, "Test");
+    TorrentMetadata torrent = new MetadataBuilder()
+            .addFile(tempFile)
+            .setTracker("http://127.0.0.1:6969/announce")
+            .setCreatedBy("Test")
+            .build();
     File torrentFile = new File(tempFile.getParentFile(), tempFile.getName() + ".torrent");
     saveTorrent(torrent, torrentFile);
 
     seeder.addTorrent(torrentFile.getAbsolutePath(), tempFile.getParent());
     seeder.start(InetAddress.getLocalHost());
 
-    waitForSeederIsAnnounsedOnTracker(torrent.getHexInfoHash());
+    waitForSeederIsAnnouncedOnTracker(torrent.getHexInfoHash());
 
     CommunicationManager leecher = createClient();
     leecher.start(InetAddress.getLocalHost());
     TorrentManager torrentManager = leecher.addTorrent(torrentFile.getAbsolutePath(), tempFiles.createTempDir().getAbsolutePath());
     waitDownloadComplete(torrentManager, 15);
     assertFalse(isSeederReceivedHaveMessage.get());
+  }
+
+  private static class BlockingTorrentListener extends TorrentListenerWrapper {
+    private final Object peerConnectMutex = new Object();
+    private boolean peerDidConnect;
+    private final Object downloadCompleteMutex = new Object();
+    private boolean downloadDidComplete;
+
+    @Override
+    public void peerConnected(PeerInformation peerInformation) {
+      synchronized (peerConnectMutex) {
+        peerDidConnect = true;
+        peerConnectMutex.notifyAll();
+      }
+    }
+
+    public void waitForAnyPeerConnected(int timeoutSec) throws InterruptedException {
+      synchronized (peerConnectMutex) {
+        if (!peerDidConnect) {
+          peerConnectMutex.wait(timeoutSec * 1000L);
+        }
+      }
+    }
+
+    @Override
+    public void downloadComplete() {
+      synchronized (downloadCompleteMutex) {
+        downloadDidComplete = true;
+        downloadCompleteMutex.notifyAll();
+      }
+    }
+
+    public void waitForDownloadCompleted(int timeoutSec) throws InterruptedException {
+      synchronized (downloadCompleteMutex) {
+        if (!downloadDidComplete) {
+          downloadCompleteMutex.wait(timeoutSec * 1000L);
+        }
+      }
+    }
   }
 
   private void waitDownloadComplete(TorrentManager torrentManager, int timeoutSec) throws InterruptedException {
@@ -145,7 +186,7 @@ public class CommunicationManagerTest {
     }
   }
 
-  private void waitForSeederIsAnnounsedOnTracker(final String hexInfoHash) {
+  private void waitForSeederIsAnnouncedOnTracker(final String hexInfoHash) {
     final WaitFor waitFor = new WaitFor(10 * 1000) {
       @Override
       protected boolean condition() {
@@ -157,7 +198,7 @@ public class CommunicationManagerTest {
 
 
   //  @Test(invocationCount = 50)
-  public void download_multiple_files() throws IOException, InterruptedException, URISyntaxException {
+  public void download_multiple_files() throws IOException {
     int numFiles = 50;
     this.tracker.setAcceptForeignTorrents(true);
 
@@ -170,8 +211,6 @@ public class CommunicationManagerTest {
 
 
     try {
-      URL announce = new URL("http://127.0.0.1:6969/announce");
-      URI announceURI = announce.toURI();
       final Set<String> names = new HashSet<String>();
       List<File> filesToShare = new ArrayList<File>();
       for (int i = 0; i < numFiles; i++) {
@@ -179,7 +218,11 @@ public class CommunicationManagerTest {
         File srcFile = new File(srcDir, tempFile.getName());
         assertTrue(tempFile.renameTo(srcFile));
 
-        TorrentMetadata torrent = TorrentCreator.create(srcFile, announceURI, "Test");
+        TorrentMetadata torrent = new MetadataBuilder()
+                .addFile(srcFile)
+                .setTracker("http://127.0.0.1:6969/announce")
+                .setCreatedBy("Test")
+                .build();
         File torrentFile = new File(srcFile.getParentFile(), srcFile.getName() + ".torrent");
         saveTorrent(torrent, torrentFile);
         filesToShare.add(srcFile);
@@ -220,7 +263,9 @@ public class CommunicationManagerTest {
 
       assertEquals(listFileNames(downloadDir), names);
     } finally {
-      leech.stop();
+      if (leech != null) {
+        leech.stop();
+      }
       seeder.stop();
     }
   }
@@ -240,10 +285,11 @@ public class CommunicationManagerTest {
     this.tracker.setAcceptForeignTorrents(true);
 
     File tempFile = tempFiles.createTempFile(500 * 1025 * 1024);
-    URL announce = new URL("http://127.0.0.1:6969/announce");
-    URI announceURI = announce.toURI();
-
-    TorrentMetadata torrent = TorrentCreator.create(tempFile, announceURI, "Test");
+    TorrentMetadata torrent = new MetadataBuilder()
+            .addFile(tempFile)
+            .setTracker("http://127.0.0.1:6969/announce")
+            .setCreatedBy("Test")
+            .build();
     File torrentFile = new File(tempFile.getParentFile(), tempFile.getName() + ".torrent");
     saveTorrent(torrent, torrentFile);
 
@@ -292,14 +338,15 @@ public class CommunicationManagerTest {
     }
   }
 
-  public void large_file_download() throws IOException, URISyntaxException, InterruptedException {
+  public void large_file_download() throws IOException {
     this.tracker.setAcceptForeignTorrents(true);
 
     File tempFile = tempFiles.createTempFile(201 * 1025 * 1024);
-    URL announce = new URL("http://127.0.0.1:6969/announce");
-    URI announceURI = announce.toURI();
-
-    TorrentMetadata torrent = TorrentCreator.create(tempFile, announceURI, "Test");
+    TorrentMetadata torrent = new MetadataBuilder()
+            .addFile(tempFile)
+            .setTracker("http://127.0.0.1:6969/announce")
+            .setCreatedBy("Test")
+            .build();
     File torrentFile = new File(tempFile.getParentFile(), tempFile.getName() + ".torrent");
     saveTorrent(torrent, torrentFile);
 
@@ -324,14 +371,15 @@ public class CommunicationManagerTest {
 
   // TODO: 24.09.2018 flaky test, it's needed to debug and fix
   @Test(enabled = false)
-  public void testManyLeechers() throws IOException, URISyntaxException, InterruptedException {
+  public void testManyLeechers() throws IOException {
     this.tracker.setAcceptForeignTorrents(true);
 
     File tempFile = tempFiles.createTempFile(400 * 1025 * 1024);
-    URL announce = new URL("http://127.0.0.1:6969/announce");
-    URI announceURI = announce.toURI();
-
-    TorrentMetadata torrent = TorrentCreator.create(tempFile, announceURI, "Test");
+    TorrentMetadata torrent = new MetadataBuilder()
+            .addFile(tempFile)
+            .setTracker("http://127.0.0.1:6969/announce")
+            .setCreatedBy("Test")
+            .build();
     File torrentFile = new File(tempFile.getParentFile(), tempFile.getName() + ".torrent");
     saveTorrent(torrent, torrentFile);
 
@@ -402,7 +450,11 @@ public class CommunicationManagerTest {
     }
     File tempFile = tempFiles.createTempFile(1024 * 20 * 1024);
 
-    TorrentMetadata torrent = TorrentCreator.create(tempFile, this.tracker.getAnnounceURI(), "Test");
+    TorrentMetadata torrent = new MetadataBuilder()
+            .addFile(tempFile)
+            .setTracker(this.tracker.getAnnounceUrl())
+            .setCreatedBy("Test")
+            .build();
     File torrentFile = new File(tempFile.getParentFile(), tempFile.getName() + ".torrent");
     saveTorrent(torrent, torrentFile);
 
@@ -423,7 +475,7 @@ public class CommunicationManagerTest {
   }
 
 
-  public void more_than_one_seeder_for_same_torrent() throws IOException, InterruptedException {
+  public void more_than_one_seeder_for_same_torrent() throws IOException {
     this.tracker.setAcceptForeignTorrents(true);
     assertEquals(0, this.tracker.getTrackedTorrents().size());
 
@@ -436,7 +488,11 @@ public class CommunicationManagerTest {
     try {
       File tempFile = tempFiles.createTempFile(100 * 1024);
 
-      TorrentMetadata torrent = TorrentCreator.create(tempFile, this.tracker.getAnnounceURI(), "Test");
+      TorrentMetadata torrent = new MetadataBuilder()
+              .addFile(tempFile)
+              .setTracker(this.tracker.getAnnounceUrl())
+              .setCreatedBy("Test")
+              .build();
       File torrentFile = new File(tempFile.getParentFile(), tempFile.getName() + ".torrent");
       saveTorrent(torrent, torrentFile);
 
@@ -491,10 +547,11 @@ public class CommunicationManagerTest {
 
     final int fileSize = 2 * 1025 * 1024;
     File tempFile = tempFiles.createTempFile(fileSize);
-    URL announce = new URL("http://127.0.0.1:6969/announce");
-    URI announceURI = announce.toURI();
-
-    TorrentMetadata torrent = TorrentCreator.create(tempFile, announceURI, "Test");
+    TorrentMetadata torrent = new MetadataBuilder()
+            .addFile(tempFile)
+            .setTracker("http://127.0.0.1:6969/announce")
+            .setCreatedBy("Test")
+            .build();
     File torrentFile = new File(tempFile.getParentFile(), tempFile.getName() + ".torrent");
     saveTorrent(torrent, torrentFile);
 
@@ -540,7 +597,7 @@ public class CommunicationManagerTest {
     assertEquals(trackedPeer.getLeft(), fileSize - downloaded);
   }
 
-  public void no_full_seeder_test() throws IOException, URISyntaxException, InterruptedException, NoSuchAlgorithmException {
+  public void no_full_seeder_test() throws IOException, NoSuchAlgorithmException {
     this.tracker.setAcceptForeignTorrents(true);
 
     final int pieceSize = 48 * 1024; // lower piece size to reduce disk usage
@@ -570,7 +627,7 @@ public class CommunicationManagerTest {
   }
 
   @Test(enabled = false)
-  public void corrupted_seeder_repair() throws IOException, URISyntaxException, InterruptedException, NoSuchAlgorithmException {
+  public void corrupted_seeder_repair() throws IOException, InterruptedException, NoSuchAlgorithmException {
     this.tracker.setAcceptForeignTorrents(true);
 
     final int pieceSize = 48 * 1024; // lower piece size to reduce disk usage
@@ -657,21 +714,25 @@ public class CommunicationManagerTest {
     }
   }
 
-  public void testThatTorrentsHaveLazyInitAndRemovingAfterDownload()
-          throws IOException, InterruptedException, URISyntaxException {
+  public void testThatTorrentsHaveLazyInitAndRemovingAfterDownload() throws IOException, InterruptedException {
     final CommunicationManager seeder = createClient();
     File tempFile = tempFiles.createTempFile(100 * 1025 * 1024);
-    URL announce = new URL("http://127.0.0.1:6969/announce");
-    URI announceURI = announce.toURI();
-
-    TorrentMetadata torrent = TorrentCreator.create(tempFile, announceURI, "Test");
+    TorrentMetadata torrent = new MetadataBuilder()
+            .addFile(tempFile)
+            .setTracker("http://127.0.0.1:6969/announce")
+            .setCreatedBy("Test")
+            .build();
     File torrentFile = new File(tempFile.getParentFile(), tempFile.getName() + ".torrent");
     saveTorrent(torrent, torrentFile);
-    seeder.addTorrent(torrentFile.getAbsolutePath(), tempFile.getParentFile().getAbsolutePath());
+    TorrentManager seederTorrentManager = seeder.addTorrent(torrentFile.getAbsolutePath(), tempFile.getParentFile().getAbsolutePath());
+    BlockingTorrentListener seederListener = new BlockingTorrentListener();
+    seederTorrentManager.addListener(seederListener);
 
     final CommunicationManager leecher = createClient();
     File downloadDir = tempFiles.createTempDir();
-    leecher.addTorrent(torrentFile.getAbsolutePath(), downloadDir.getAbsolutePath());
+    TorrentManager leecherTorrentManager = leecher.addTorrent(torrentFile.getAbsolutePath(), downloadDir.getAbsolutePath());
+    BlockingTorrentListener leecherListener = new BlockingTorrentListener();
+    leecherTorrentManager.addListener(leecherListener);
     seeder.start(InetAddress.getLocalHost());
 
     assertEquals(1, seeder.getTorrentsStorage().announceableTorrents().size());
@@ -680,40 +741,23 @@ public class CommunicationManagerTest {
 
     leecher.start(InetAddress.getLocalHost());
 
-    WaitFor waitFor = new WaitFor(10 * 1000) {
-
-      @Override
-      protected boolean condition() {
-        return seeder.getTorrentsStorage().activeTorrents().size() == 1 &&
-                leecher.getTorrentsStorage().activeTorrents().size() == 1;
-      }
-    };
-
-    assertTrue(waitFor.isMyResult(), "Torrent was not successfully initialized");
+    seederListener.waitForAnyPeerConnected(10);
+    leecherListener.waitForAnyPeerConnected(10);
 
     assertEquals(1, seeder.getTorrentsStorage().activeTorrents().size());
     assertEquals(1, leecher.getTorrentsStorage().activeTorrents().size());
 
-    waitForFileInDir(downloadDir, tempFile.getName());
+    seederListener.waitForDownloadCompleted(10);
+    leecherListener.waitForDownloadCompleted(10);
+
+    assertFileInDir(downloadDir, tempFile.getName());
     assertFilesEqual(tempFile, new File(downloadDir, tempFile.getName()));
-
-    waitFor = new WaitFor(10 * 1000) {
-
-      @Override
-      protected boolean condition() {
-        return seeder.getTorrentsStorage().activeTorrents().size() == 0 &&
-                leecher.getTorrentsStorage().activeTorrents().size() == 0;
-      }
-    };
-
-    assertTrue(waitFor.isMyResult(), "Torrent was not successfully removed");
 
     assertEquals(0, seeder.getTorrentsStorage().activeTorrents().size());
     assertEquals(0, leecher.getTorrentsStorage().activeTorrents().size());
-
   }
 
-  public void corrupted_seeder() throws IOException, InterruptedException, NoSuchAlgorithmException {
+  public void corrupted_seeder() throws IOException, NoSuchAlgorithmException {
     this.tracker.setAcceptForeignTorrents(true);
 
     final int pieceSize = 48 * 1024; // lower piece size to reduce disk usage
@@ -733,7 +777,12 @@ public class CommunicationManagerTest {
       final File client2File = new File(client2Dir, baseFile.getName());
       FileUtils.copyFile(badFile, client2File);
 
-      final TorrentMetadata torrent = TorrentCreator.create(baseFile, null, this.tracker.getAnnounceURI(), null, "Test", pieceSize);
+      TorrentMetadata torrent = new MetadataBuilder()
+              .addFile(baseFile)
+              .setTracker(this.tracker.getAnnounceUrl())
+              .setCreatedBy("Test")
+              .setPieceLength(pieceSize)
+              .build();
       final File torrentFile = tempFiles.createTempFile();
       saveTorrent(torrent, torrentFile);
 
@@ -786,7 +835,11 @@ public class CommunicationManagerTest {
     tracker.setAcceptForeignTorrents(true);
 
     final File dwnlFile = tempFiles.createTempFile(513 * 1024 * 7);
-    final TorrentMetadata torrent = TorrentCreator.create(dwnlFile, null, tracker.getAnnounceURI(), "Test");
+    TorrentMetadata torrent = new MetadataBuilder()
+            .addFile(dwnlFile)
+            .setTracker(this.tracker.getAnnounceUrl())
+            .setCreatedBy("Test")
+            .build();
     final File torrentFile = tempFiles.createTempFile();
     saveTorrent(torrent, torrentFile);
 
@@ -805,7 +858,11 @@ public class CommunicationManagerTest {
     tracker.setAcceptForeignTorrents(true);
 
     final File dwnlFile = tempFiles.createTempFile(513 * 1024 * 7);
-    final TorrentMetadata torrent = TorrentCreator.create(dwnlFile, null, tracker.getAnnounceURI(), "Test");
+    TorrentMetadata torrent = new MetadataBuilder()
+            .addFile(dwnlFile)
+            .setTracker(this.tracker.getAnnounceUrl())
+            .setCreatedBy("Test")
+            .build();
     final File torrentFile = tempFiles.createTempFile();
     saveTorrent(torrent, torrentFile);
 
@@ -835,7 +892,11 @@ public class CommunicationManagerTest {
     leecher.setMaxOutConnectionsCount(10);
 
     final File dwnlFile = tempFiles.createTempFile(513 * 1024 * 34);
-    final TorrentMetadata torrent = TorrentCreator.create(dwnlFile, null, tracker.getAnnounceURI(), "Test");
+    final TorrentMetadata torrent = new MetadataBuilder()
+            .addFile(dwnlFile)
+            .setTracker(this.tracker.getAnnounceUrl())
+            .setCreatedBy("Test")
+            .build();
     final File torrentFile = tempFiles.createTempFile();
     saveTorrent(torrent, torrentFile);
 
@@ -914,7 +975,11 @@ public class CommunicationManagerTest {
     CommunicationManager seeder = createClient();
 
     final File dwnlFile = tempFiles.createTempFile(513 * 1024 * 34);
-    final TorrentMetadata torrent = TorrentCreator.create(dwnlFile, null, tracker.getAnnounceURI(), "Test");
+    final TorrentMetadata torrent = new MetadataBuilder()
+            .addFile(dwnlFile)
+            .setTracker(this.tracker.getAnnounceUrl())
+            .setCreatedBy("Test")
+            .build();
     final File torrentFile = tempFiles.createTempFile();
     saveTorrent(torrent, torrentFile);
 
@@ -950,7 +1015,11 @@ public class CommunicationManagerTest {
     tracker.setAcceptForeignTorrents(true);
     CommunicationManager seeder = createClient();
     final File dwnlFile = tempFiles.createTempFile(513 * 1024 * 24);
-    final TorrentMetadata torrent = TorrentCreator.create(dwnlFile, null, tracker.getAnnounceURI(), "Test");
+    final TorrentMetadata torrent = new MetadataBuilder()
+            .addFile(dwnlFile)
+            .setTracker(this.tracker.getAnnounceUrl())
+            .setCreatedBy("Test")
+            .build();
 
     final File torrentFile = tempFiles.createTempFile();
     saveTorrent(torrent, torrentFile);
@@ -968,7 +1037,11 @@ public class CommunicationManagerTest {
     final CommunicationManager seeder = createClient();
 
     final File dwnlFile = tempFiles.createTempFile(513 * 1024 * 24);
-    final TorrentMetadata torrent = TorrentCreator.create(dwnlFile, null, tracker.getAnnounceURI(), "Test");
+    final TorrentMetadata torrent = new MetadataBuilder()
+            .addFile(dwnlFile)
+            .setTracker(this.tracker.getAnnounceUrl())
+            .setCreatedBy("Test")
+            .build();
 
     final File torrentFile = tempFiles.createTempFile();
     saveTorrent(torrent, torrentFile);
@@ -1024,7 +1097,11 @@ public class CommunicationManagerTest {
     tracker.setAcceptForeignTorrents(true);
     CommunicationManager seeder = createClient();
     final File dwnlFile = tempFiles.createTempFile(513 * 1024 * 24);
-    final TorrentMetadata torrent = TorrentCreator.create(dwnlFile, null, tracker.getAnnounceURI(), "Test");
+    final TorrentMetadata torrent = new MetadataBuilder()
+            .addFile(dwnlFile)
+            .setTracker(this.tracker.getAnnounceUrl())
+            .setCreatedBy("Test")
+            .build();
 
     final File torrentFile = tempFiles.createTempFile();
     saveTorrent(torrent, torrentFile);
@@ -1083,7 +1160,11 @@ public class CommunicationManagerTest {
     final CommunicationManager seed2 = createClient();
 
     final File dwnlFile = tempFiles.createTempFile(513 * 1024 * 240);
-    final TorrentMetadata torrent = TorrentCreator.create(dwnlFile, tracker.getAnnounceURI(), "Test");
+    final TorrentMetadata torrent = new MetadataBuilder()
+            .addFile(dwnlFile)
+            .setTracker(this.tracker.getAnnounceUrl())
+            .setCreatedBy("Test")
+            .build();
 
     final File torrentFile = tempFiles.createTempFile();
     saveTorrent(torrent, torrentFile);
@@ -1127,7 +1208,11 @@ public class CommunicationManagerTest {
     tracker.setAcceptForeignTorrents(true);
     CommunicationManager seeder = createClient();
     final File dwnlFile = tempFiles.createTempFile(513 * 1024 * 24 + 1);
-    final TorrentMetadata torrent = TorrentCreator.create(dwnlFile, null, tracker.getAnnounceURI(), "Test");
+    final TorrentMetadata torrent = new MetadataBuilder()
+            .addFile(dwnlFile)
+            .setTracker(this.tracker.getAnnounceUrl())
+            .setCreatedBy("Test")
+            .build();
 
     final File torrentFile = tempFiles.createTempFile();
     saveTorrent(torrent, torrentFile);
@@ -1171,7 +1256,11 @@ public class CommunicationManagerTest {
     tracker.setAcceptForeignTorrents(true);
     final CommunicationManager seeder = createAndStartClient();
     final File dwnlFile = tempFiles.createTempFile(513 * 1024 * 24);
-    final TorrentMetadata torrent = TorrentCreator.create(dwnlFile, null, tracker.getAnnounceURI(), "Test");
+    final TorrentMetadata torrent = new MetadataBuilder()
+            .addFile(dwnlFile)
+            .setTracker(this.tracker.getAnnounceUrl())
+            .setCreatedBy("Test")
+            .build();
     final PieceStorage seederStorage = FullyPieceStorageFactory.INSTANCE.createStorage(torrent, new FileStorage(dwnlFile, 0, dwnlFile.length()));
     seeder.addTorrent(new TorrentMetadataProvider() {
       @NotNull
@@ -1216,7 +1305,11 @@ public class CommunicationManagerTest {
     tracker.setAcceptForeignTorrents(true);
     CommunicationManager seeder = createClient();
     final File dwnlFile = tempFiles.createTempFile(513 * 1024 * 240);
-    final TorrentMetadata torrent = TorrentCreator.create(dwnlFile, null, tracker.getAnnounceURI(), "Test");
+    final TorrentMetadata torrent = new MetadataBuilder()
+            .addFile(dwnlFile)
+            .setTracker(this.tracker.getAnnounceUrl())
+            .setCreatedBy("Test")
+            .build();
 
     final File torrentFile = tempFiles.createTempFile();
     saveTorrent(torrent, torrentFile);
@@ -1255,7 +1348,11 @@ public class CommunicationManagerTest {
     tracker.setAcceptForeignTorrents(true);
     final CommunicationManager seeder = createClient();
     final File dwnlFile = tempFiles.createTempFile(513 * 1024 * 60);
-    final TorrentMetadata torrent = TorrentCreator.create(dwnlFile, null, tracker.getAnnounceURI(), "Test");
+    final TorrentMetadata torrent = new MetadataBuilder()
+            .addFile(dwnlFile)
+            .setTracker(this.tracker.getAnnounceUrl())
+            .setCreatedBy("Test")
+            .build();
 
     final File torrentFile = tempFiles.createTempFile();
     saveTorrent(torrent, torrentFile);
@@ -1292,7 +1389,7 @@ public class CommunicationManagerTest {
     assertTrue(interrupted.get());
   }
 
-  public void test_connect_to_unknown_host() throws InterruptedException, IOException {
+  public void test_connect_to_unknown_host() throws IOException {
     final File torrent = new File("src/test/resources/torrents/file1.jar.torrent");
     final TrackedTorrent tt = TrackedTorrent.load(torrent);
     final CommunicationManager seeder = createAndStartClient();
@@ -1321,7 +1418,11 @@ public class CommunicationManagerTest {
 
     CommunicationManager seeder = createAndStartClient();
 
-    final TorrentMetadata torrent = TorrentCreator.create(srcFile, null, tracker.getAnnounceURI(), "Test");
+    final TorrentMetadata torrent = new MetadataBuilder()
+            .addFile(srcFile)
+            .setTracker(tracker.getAnnounceUrl())
+            .setCreatedBy("Test")
+            .build();
 
     File torrentFile = tempFiles.createTempFile();
     saveTorrent(torrent, torrentFile);
@@ -1383,7 +1484,11 @@ public class CommunicationManagerTest {
   public void testManySeeders() throws Exception {
     File artifact = tempFiles.createTempFile(256 * 1024 * 1024);
     int seedersCount = 15;
-    TorrentMetadata torrent = TorrentCreator.create(artifact, this.tracker.getAnnounceURI(), "test");
+    TorrentMetadata torrent = new MetadataBuilder()
+            .addFile(artifact)
+            .setTracker(this.tracker.getAnnounceUrl())
+            .setCreatedBy("Test")
+            .build();
     File torrentFile = tempFiles.createTempFile();
     saveTorrent(torrent, torrentFile);
     ServerChannelRegister serverChannelRegister = new FirstAvailableChannel(6881, 10000);
@@ -1410,7 +1515,7 @@ public class CommunicationManagerTest {
   }
 
   private String createMultipleSeedersWithDifferentPieces(File baseFile, int piecesCount, int pieceSize, int numSeeders,
-                                                          List<CommunicationManager> communicationManagerList, List<File> targetFiles) throws IOException, InterruptedException, URISyntaxException {
+                                                          List<CommunicationManager> communicationManagerList, List<File> targetFiles) throws IOException {
 
     List<byte[]> piecesList = new ArrayList<byte[]>(piecesCount);
     FileInputStream fin = new FileInputStream(baseFile);
@@ -1422,7 +1527,12 @@ public class CommunicationManagerTest {
     fin.close();
 
     final long torrentFileLength = baseFile.length();
-    TorrentMetadata torrent = TorrentCreator.create(baseFile, null, this.tracker.getAnnounceURI(), null, "Test", pieceSize);
+    TorrentMetadata torrent = new MetadataBuilder()
+            .addFile(baseFile)
+            .setTracker(this.tracker.getAnnounceUrl())
+            .setCreatedBy("Test")
+            .setPieceLength(pieceSize)
+            .build();
     File torrentFile = new File(baseFile.getParentFile(), baseFile.getName() + ".torrent");
     saveTorrent(torrent, torrentFile);
 
@@ -1459,12 +1569,16 @@ public class CommunicationManagerTest {
       }
     };
 
+    assertFileInDir(downloadDir, fileName);
+  }
+
+  private void assertFileInDir(File downloadDir, String fileName) {
     assertTrue(new File(downloadDir, fileName).isFile());
   }
 
 
   @AfterMethod
-  protected void tearDown() throws Exception {
+  protected void tearDown() {
     for (CommunicationManager communicationManager : communicationManagerList) {
       communicationManager.stop();
     }
@@ -1479,7 +1593,7 @@ public class CommunicationManagerTest {
     this.tracker.start(true);
   }
 
-  private CommunicationManager createAndStartClient() throws IOException, InterruptedException {
+  private CommunicationManager createAndStartClient() throws IOException {
     CommunicationManager communicationManager = createClient();
     communicationManager.start(InetAddress.getLocalHost());
     return communicationManager;

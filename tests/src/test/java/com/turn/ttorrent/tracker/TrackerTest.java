@@ -121,7 +121,7 @@ public class TrackerTest {
 
   }
 
-  public void test_share_and_download() throws IOException, InterruptedException {
+  public void test_share_and_download() throws IOException {
     final TrackedTorrent tt = this.tracker.announce(loadTorrent("file1.jar.torrent"));
     assertEquals(0, tt.getPeers().size());
 
@@ -149,7 +149,7 @@ public class TrackerTest {
     }
   }
 
-  public void tracker_accepts_torrent_from_seeder() throws IOException, InterruptedException {
+  public void tracker_accepts_torrent_from_seeder() throws IOException {
     this.tracker.setAcceptForeignTorrents(true);
     CommunicationManager seeder = createCommunicationManager();
     File torrentFile = new File(TEST_RESOURCES + "/torrents", "file1.jar.torrent");
@@ -175,7 +175,7 @@ public class TrackerTest {
     }
   }
 
-  public void tracker_accepts_torrent_from_leech() throws IOException, InterruptedException {
+  public void tracker_accepts_torrent_from_leech() throws IOException {
     this.tracker.setAcceptForeignTorrents(true);
 
     final File downloadDir = tempFiles.createTempDir();
@@ -211,7 +211,7 @@ public class TrackerTest {
     }
   }
 
-  public void tracker_removes_peer_after_peer_shutdown() throws IOException, InterruptedException {
+  public void tracker_removes_peer_after_peer_shutdown() throws IOException {
     tracker.setAcceptForeignTorrents(true);
     File torrentFile = new File(TEST_RESOURCES + "/torrents", "file1.jar.torrent");
     File parentFiles = new File(TEST_RESOURCES + "/parentFiles");
@@ -257,7 +257,7 @@ public class TrackerTest {
     assertFalse(tt.getPeers().containsKey(new PeerUID(c2Address, tt.getHexInfoHash())));
   }
 
-  public void tracker_removes_peer_after_timeout() throws IOException, InterruptedException {
+  public void tracker_removes_peer_after_timeout() throws IOException {
     tracker.setAcceptForeignTorrents(true);
     tracker.stop();
     tracker.start(true);
@@ -316,7 +316,7 @@ public class TrackerTest {
   }
 
   //  @Test(invocationCount = 50)
-  public void tracker_accepts_torrent_from_seeder_plus_leech() throws IOException, InterruptedException {
+  public void tracker_accepts_torrent_from_seeder_plus_leech() throws IOException {
     this.tracker.setAcceptForeignTorrents(true);
     assertEquals(0, this.tracker.getTrackedTorrents().size());
 
@@ -358,7 +358,7 @@ public class TrackerTest {
   }
 
   @AfterMethod
-  protected void tearDown() throws Exception {
+  protected void tearDown() {
     for (CommunicationManager communicationManager : communicationManagerList) {
       communicationManager.stop();
     }

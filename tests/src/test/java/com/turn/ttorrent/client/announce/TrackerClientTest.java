@@ -98,7 +98,7 @@ public class TrackerClientTest {
   }
 
   @AfterMethod
-  protected void tearDown() throws Exception {
+  protected void tearDown() {
     stopTracker();
   }
 }
