@@ -29,36 +29,35 @@ public class FairPieceStorageFactory implements PieceStorageFactory {
     }
 
     byteStorage.open(false);
-    boolean completelyBlank = byteStorage.isBlank();
     BitSet availablePieces = new BitSet(metadata.getPiecesCount());
     try {
-      int pieceLength = metadata.getPieceLength();
-      for (int i = 0; i < metadata.getPiecesCount(); i++) {
-        long position = (long) i * pieceLength;
-        int len;
-        if (totalSize - position > pieceLength) {
-          len = pieceLength;
-        } else {
-          len = (int) (totalSize - position);
-        }
-        byte[] expectedHash = Arrays.copyOfRange(metadata.getPiecesHashes(), i * Constants.PIECE_HASH_SIZE, (i + 1) * Constants.PIECE_HASH_SIZE);
-        byte[] actualHash;
-        if (completelyBlank || byteStorage.isBlank(position, len)) {
-          actualHash = TorrentUtils.calculateZeroSha1Hash(len);
-        } else {
-          ByteBuffer buffer = ByteBuffer.allocate(len);
-          byteStorage.read(buffer, position);
+      if (!byteStorage.isBlank()) {
+        int pieceLength = metadata.getPieceLength();
+        for (int i = 0; i < metadata.getPiecesCount(); i++) {
+          long position = (long) i * pieceLength;
+          int len;
+          if (totalSize - position > pieceLength) {
+            len = pieceLength;
+          } else {
+            len = (int) (totalSize - position);
+          }
+          byte[] expectedHash = Arrays.copyOfRange(metadata.getPiecesHashes(), i * Constants.PIECE_HASH_SIZE, (i + 1) * Constants.PIECE_HASH_SIZE);
+          byte[] actualHash;
+          if (!byteStorage.isBlank(position, len)) {
+            ByteBuffer buffer = ByteBuffer.allocate(len);
+            byteStorage.read(buffer, position);
 
-          actualHash = TorrentUtils.calculateSha1Hash(buffer.array());
-        }
-        if (Arrays.equals(expectedHash, actualHash)) {
-          availablePieces.set(i);
+            actualHash = TorrentUtils.calculateSha1Hash(buffer.array());
+            if (Arrays.equals(expectedHash, actualHash)) {
+              availablePieces.set(i);
+            }
+          }
         }
       }
     } finally {
       byteStorage.close();
     }
-
+    
     return new PieceStorageImpl(
             byteStorage,
             availablePieces,
