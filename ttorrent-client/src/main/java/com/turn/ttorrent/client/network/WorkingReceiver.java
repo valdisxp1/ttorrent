@@ -42,7 +42,7 @@ public class WorkingReceiver implements DataProcessor {
 
   @Override
   public DataProcessor processAndGetNext(ByteChannel socketChannel) throws IOException {
-    logger.trace("received data from channel", socketChannel);
+    logger.trace("received data from channel {}", socketChannel);
     if (pstrLength == -1) {
       messageBytes.limit(PeerMessage.MESSAGE_LENGTH_FIELD_SIZE);
       final int read;
@@ -105,7 +105,7 @@ public class WorkingReceiver implements DataProcessor {
 
     final String hexInfoHash = peer.getHexInfoHash();
     SharedTorrent torrent = myContext.getTorrentsStorage().getTorrent(hexInfoHash);
-    if (torrent == null || !myContext.getTorrentsStorage().hasTorrent(hexInfoHash)) {
+    if (torrent == null) {
       logger.debug("torrent with hash {} for peer {} doesn't found in storage. Maybe somebody deletes it manually", hexInfoHash, peer);
       return new ShutdownAndRemovePeerProcessor(myPeerUID, myContext).processAndGetNext(socketChannel);
     }
